@@ -1,0 +1,14 @@
+{
+  "id": "webhook_1",
+  "type": "transfer.transfer_created",
+  "createdAt": "2026-11-22T09:15:04.221Z",
+  "data": {
+    "transferId": "trf_7c1e9b0a4d2f4f8e",
+    "partnerId": "partner_sandbox_demo",
+    "status": "CREATED",
+    "amountMinor": 25000,
+    "currency": "SLE",
+    "providerReference": null,
+    "failureCode": null
+  }
+}

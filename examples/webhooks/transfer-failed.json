@@ -1,0 +1,14 @@
+{
+  "id": "webhook_6",
+  "type": "transfer.provider_failed",
+  "createdAt": "2026-11-22T09:16:12.034Z",
+  "data": {
+    "transferId": "trf_2b9a41d7c6e84a03",
+    "partnerId": "partner_sandbox_demo",
+    "status": "FAILED",
+    "amountMinor": 7500,
+    "currency": "SLE",
+    "providerReference": "SAPS-SBX-1A77BE30",
+    "failureCode": "PROVIDER_REJECTED"
+  }
+}

@@ -1,0 +1,19 @@
+Copyright © 2026 ManoLink Technologies Limited. All rights reserved.
+
+This repository describes the sandbox interface of software that is proprietary to ManoLink
+Technologies Limited.
+
+Documentation licence
+---------------------
+
+You may read, copy, quote and redistribute this repository's documentation (the README, the
+OpenAPI description and the example payloads and scripts) for the purpose of evaluating,
+building or operating an integration with the Wakarail sandbox.
+
+Nothing else is licensed. In particular, no licence is granted to the Wakarail service, to any
+implementation of it, or to any trade mark, logo or product name of the Company. The documentation
+is provided "as is", without warranty of any kind, and describes a sandbox in which live money
+movement is disabled.
+
+The software itself remains proprietary and is not distributed here. Contact
+hello@wakabots.com for licensing, partnership and pilot enquiries.

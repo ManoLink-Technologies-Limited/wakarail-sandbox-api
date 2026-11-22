@@ -1,0 +1,474 @@
+openapi: 3.1.0
+info:
+  title: Wakarail Sandbox Transfer API
+  version: 0.1.0
+  summary: Partner-facing transfer API for the Wakarail sandbox.
+  description: |
+    Wakarail routes mobile-money transfers between wallets through a licensed sponsor.
+
+    This document covers the partner-facing sandbox surface: quoting a route, creating a
+    transfer, reading its lifecycle, and simulating the sponsor's answer. The engine's
+    implementation is proprietary and not part of this repository.
+
+    **Sandbox only.** No endpoint described here moves real money. Live money is disabled,
+    every provider adapter is `NOT_VERIFIED`, and live operation waits on Bank of Sierra Leone
+    authorisation, provider agreements and an independent security review.
+
+    Amounts are integer minor units of SLE (1 SLE = 100). Account numbers are used in memory
+    only; responses return masked accounts and never the raw value or a reversible fingerprint.
+    Wakarail never requests or stores a customer PIN and does not hold balances.
+  contact:
+    name: ManoLink Technologies Limited
+    email: hello@wakabots.com
+    url: https://github.com/ManoLink-Technologies-Limited
+  license:
+    name: Proprietary — documentation licence only
+    url: https://github.com/ManoLink-Technologies-Limited/wakarail-sandbox-api/blob/main/LICENSE
+servers:
+  - url: https://sandbox.wakarail.example
+    description: >-
+      Illustrative host only. Use the sandbox base URL issued with your partner credentials.
+tags:
+  - name: Transfers
+  - name: Sandbox
+  - name: Service
+security:
+  - partnerApiKey: []
+paths:
+  /v1/quotes:
+    post:
+      tags: [Transfers]
+      summary: Quote the fee and route for a prospective transfer
+      description: >-
+        Quotes the same route planning and fee policy that `POST /v1/transfers` will apply, so a
+        caller can show the recipient amount before instructing a transfer. Quoting creates
+        nothing and moves nothing.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/QuoteRequest" }
+            examples:
+              crossWallet:
+                value:
+                  sourceNetwork: ORANGE_MONEY_SL
+                  destinationNetwork: AFRIMONEY_SL
+                  amountMinor: 25000
+                  currency: SLE
+      responses:
+        "200":
+          description: The quoted fee policy and chosen route
+          headers:
+            x-request-id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/QuoteResponse" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /v1/transfers:
+    post:
+      tags: [Transfers]
+      summary: Create or replay a sandbox transfer
+      description: |
+        Creates the transfer, its routing event and its provider-submission job atomically, then
+        returns `202`. A repeat of the same `idempotency-key` with the same body returns the
+        original transfer with `200` and `replayed: true`; the same key with a different body is
+        a `409`.
+
+        `senderAccount` and `recipientAccount` are used in memory to plan the route. They are
+        not persisted in raw form, and the response returns masked accounts only.
+      parameters:
+        - $ref: "#/components/parameters/IdempotencyKey"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/TransferRequest" }
+            examples:
+              crossWallet:
+                value:
+                  sourceNetwork: ORANGE_MONEY_SL
+                  destinationNetwork: AFRIMONEY_SL
+                  amountMinor: 25000
+                  currency: SLE
+                  senderAccount: "+23276000001"
+                  recipientAccount: "+23277000002"
+      responses:
+        "202":
+          description: Transfer accepted and queued for submission
+          headers:
+            x-request-id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransferCreated" }
+        "200":
+          description: Idempotent replay of an earlier request with the same key and body
+          headers:
+            x-request-id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TransferCreated" }
+        "400": { $ref: "#/components/responses/Error" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+        "429": { $ref: "#/components/responses/Error" }
+  /v1/transfers/{transferId}:
+    get:
+      tags: [Transfers]
+      summary: Read a transfer and its event chain
+      description: >-
+        Returns the transfer together with its ordered events. Each event records the status
+        before and after, the data attached to it and the hashes that chain it to its predecessor,
+        so a modified history is detectable. A transfer belonging to another partner is reported
+        as `404`.
+      parameters:
+        - $ref: "#/components/parameters/TransferId"
+      responses:
+        "200":
+          description: The transfer and its events
+          headers:
+            x-request-id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transfer, events]
+                properties:
+                  transfer: { $ref: "#/components/schemas/Transfer" }
+                  events:
+                    type: array
+                    items: { $ref: "#/components/schemas/TransferEvent" }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+  /sandbox/transfers/{transferId}/settle:
+    post:
+      tags: [Sandbox]
+      summary: Simulate the sponsor settling a submitted transfer
+      description: >-
+        Stands in for the sponsor's signed status callback so an integration can reach `SETTLED`
+        without waiting for a real provider. Only available in sandbox mode, and only once the
+        transfer has a provider reference (`SUBMITTED`); otherwise `409`.
+      parameters:
+        - $ref: "#/components/parameters/TransferId"
+      responses:
+        "200":
+          description: The settled transfer
+          headers:
+            x-request-id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema:
+                type: object
+                required: [transfer, simulated]
+                properties:
+                  transfer: { $ref: "#/components/schemas/Transfer" }
+                  simulated: { type: boolean, const: true }
+        "401": { $ref: "#/components/responses/Error" }
+        "403": { $ref: "#/components/responses/Error" }
+        "404": { $ref: "#/components/responses/Error" }
+        "409": { $ref: "#/components/responses/Error" }
+  /v1/providers:
+    get:
+      tags: [Service]
+      summary: List provider capability status
+      description: >-
+        Reports each provider's role and readiness. In the sandbox every commercial connector is
+        `NOT_VERIFIED` and only the local simulation adapter is `SANDBOX`; no adapter may be
+        marked `ACTIVE` before provider ownership, credentials, callback signing, fees and
+        escalation are contractually verified.
+      security: []
+      responses:
+        "200":
+          description: Provider posture
+          headers:
+            x-request-id: { $ref: "#/components/headers/RequestId" }
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProvidersResponse" }
+webhooks:
+  transferCreated:
+    post:
+      summary: A transfer has been recorded
+      description: >-
+        Sent once per transfer event when a subscription is enabled. Type is
+        `transfer.transfer_created`. Payloads contain operational fields only — no account
+        numbers, raw or hashed.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEnvelope" }
+            examples:
+              created:
+                externalValue: https://github.com/ManoLink-Technologies-Limited/wakarail-sandbox-api/blob/main/examples/webhooks/transfer-created.json
+      responses:
+        "2XX":
+          description: Your endpoint accepted the delivery
+  transferProviderSettled:
+    post:
+      summary: The sponsor reported the transfer settled
+      description: Type is `transfer.provider_settled` and `data.status` is `SETTLED`.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEnvelope" }
+            examples:
+              settled:
+                externalValue: https://github.com/ManoLink-Technologies-Limited/wakarail-sandbox-api/blob/main/examples/webhooks/transfer-settled.json
+      responses:
+        "2XX":
+          description: Your endpoint accepted the delivery
+  transferProviderFailed:
+    post:
+      summary: The sponsor reported the transfer failed
+      description: >-
+        Type is `transfer.provider_failed`; `data.status` is `FAILED` and `data.failureCode`
+        carries the reason.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/WebhookEnvelope" }
+            examples:
+              failed:
+                externalValue: https://github.com/ManoLink-Technologies-Limited/wakarail-sandbox-api/blob/main/examples/webhooks/transfer-failed.json
+      responses:
+        "2XX":
+          description: Your endpoint accepted the delivery
+components:
+  securitySchemes:
+    partnerApiKey:
+      type: http
+      scheme: bearer
+      description: |
+        Partner API key issued by ManoLink Technologies Limited, sent as
+        `Authorization: Bearer <key>`. Each credential resolves to one partner and an explicit
+        permission set, and can be rotated with an overlap window.
+
+        Credentials may additionally require Ed25519 request signing with the
+        `x-wakarail-timestamp`, `x-wakarail-nonce`, `x-wakarail-content-sha256` and
+        `x-wakarail-signature` headers; see the repository README for the canonical string.
+  parameters:
+    TransferId:
+      name: transferId
+      in: path
+      required: true
+      schema: { type: string, minLength: 1, maxLength: 128 }
+    IdempotencyKey:
+      name: idempotency-key
+      in: header
+      required: false
+      description: >-
+        Client-generated key that makes creation safe to retry. Replaying a key with the same
+        body returns the original transfer; reusing it with a different body is a `409`.
+      schema: { type: string, minLength: 8, maxLength: 128 }
+  headers:
+    RequestId:
+      description: Identifier for this request, echoed in logs instead of request content.
+      schema: { type: string }
+  schemas:
+    WalletNetwork:
+      type: string
+      description: Mobile-money network. Values are the two Sierra Leonean wallets Wakarail routes between.
+      enum: [ORANGE_MONEY_SL, AFRIMONEY_SL]
+    TransferStatus:
+      type: string
+      description: >-
+        Lifecycle position. `AWAITING_FUNDING` and `FUNDED` belong to the cross-border product and
+        never occur on a domestic transfer.
+      enum:
+        - CREATED
+        - AWAITING_FUNDING
+        - FUNDED
+        - ROUTING
+        - SUBMITTED
+        - SETTLED
+        - FAILED
+        - REVERSAL_PENDING
+        - REVERSED
+    QuoteRequest:
+      type: object
+      additionalProperties: false
+      required: [sourceNetwork, destinationNetwork, amountMinor, currency]
+      properties:
+        sourceNetwork: { $ref: "#/components/schemas/WalletNetwork" }
+        destinationNetwork: { $ref: "#/components/schemas/WalletNetwork" }
+        amountMinor:
+          type: integer
+          minimum: 1
+          description: Principal in minor units of SLE (1 SLE = 100). Integer only — never a float.
+        currency: { type: string, const: SLE }
+    QuoteResponse:
+      type: object
+      description: >-
+        The fee policy that will be applied if this route and amount are instructed, plus the
+        chosen route. Values are repeated on the created transfer.
+      additionalProperties: true
+      properties:
+        quote:
+          type: object
+          description: Fee breakdown in integer minor units, quoted for the authenticated partner.
+        route:
+          type: object
+          description: The planned source/destination network route and the sponsor path used.
+    TransferRequest:
+      allOf:
+        - $ref: "#/components/schemas/QuoteRequest"
+        - type: object
+          required: [senderAccount, recipientAccount]
+          properties:
+            senderAccount:
+              type: string
+              description: >-
+                Sending mobile-money number. Used in memory to plan the route; not persisted in
+                raw form and never returned.
+            recipientAccount:
+              type: string
+              description: >-
+                Receiving mobile-money number. Used in memory to plan the route; not persisted in
+                raw form and never returned.
+    Transfer:
+      type: object
+      description: >-
+        An authorised projection of a transfer. Internal idempotency and request hashes and the
+        keyed account fingerprints are removed before the record leaves the engine.
+      required: [id, status, amountMinor, currency, createdAt]
+      properties:
+        id: { type: string }
+        partnerId: { type: string }
+        sourceNetwork: { $ref: "#/components/schemas/WalletNetwork" }
+        destinationNetwork: { $ref: "#/components/schemas/WalletNetwork" }
+        senderMasked:
+          type: string
+          description: Masked sending account, safe to display.
+        recipientMasked:
+          type: string
+          description: Masked receiving account, safe to display.
+        principalAmountMinor:
+          type: integer
+          description: Principal in integer minor units of SLE.
+        amountMinor:
+          type: integer
+          description: Alias of the principal used in webhook payloads.
+        currency: { type: string, const: SLE }
+        feeBps: { type: integer, description: Partner revenue rate applied to this transfer. }
+        expectedPlatformFeeMinor: { type: integer }
+        customerFeeMinor: { type: integer }
+        recipientAmountMinor: { type: integer }
+        feePayer: { type: string, enum: [PARTNER] }
+        status: { $ref: "#/components/schemas/TransferStatus" }
+        transferType: { type: string, description: Domestic or cross-border product path. }
+        providerReference:
+          type: [string, "null"]
+          description: The sponsor's reference for a submitted transfer.
+        failureCode:
+          type: [string, "null"]
+          description: Reason recorded when the sponsor reports failure.
+        createdAt: { type: string, format: date-time }
+        updatedAt: { type: string, format: date-time }
+    TransferCreated:
+      type: object
+      required: [transfer, replayed, liveMoneyEnabled]
+      properties:
+        transfer: { $ref: "#/components/schemas/Transfer" }
+        route:
+          type: object
+          description: The route selected for this transfer.
+        replayed:
+          type: boolean
+          description: True when this is an idempotent replay rather than a new transfer.
+        riskReview:
+          type: [object, "null"]
+          description: >-
+            Risk review state when a transfer is held. The rule that matched is never returned,
+            so thresholds cannot be probed.
+          properties:
+            status: { type: string }
+        liveMoneyEnabled:
+          type: boolean
+          const: false
+          description: Always false on this sandbox surface.
+    TransferEvent:
+      type: object
+      description: One immutable step in a transfer's history.
+      additionalProperties: true
+      required: [id, sequence, eventType, toStatus, createdAt]
+      properties:
+        id: { type: integer }
+        transferId: { type: string }
+        sequence: { type: integer, minimum: 1 }
+        eventType:
+          type: string
+          description: Event name, for example `TRANSFER_CREATED`, `ROUTE_SELECTED` or `PROVIDER_SETTLED`.
+        fromStatus:
+          oneOf:
+            - { $ref: "#/components/schemas/TransferStatus" }
+            - { type: "null" }
+        toStatus: { $ref: "#/components/schemas/TransferStatus" }
+        data:
+          type: object
+          description: Event-specific data. Never contains raw account numbers.
+        createdAt: { type: string, format: date-time }
+    WebhookEnvelope:
+      type: object
+      required: [id, type, createdAt, data]
+      properties:
+        id:
+          type: string
+          description: Stable webhook ID, also an input to the delivery signature.
+        type:
+          type: string
+          description: >-
+            `transfer.` followed by the lowercased event name, for example
+            `transfer.transfer_created`, `transfer.provider_settled`,
+            `transfer.provider_failed`.
+          examples: [transfer.transfer_created]
+        createdAt: { type: string, format: date-time }
+        data:
+          type: object
+          required: [transferId, partnerId, status, amountMinor, currency]
+          properties:
+            transferId: { type: string }
+            partnerId: { type: string }
+            status: { $ref: "#/components/schemas/TransferStatus" }
+            amountMinor: { type: integer }
+            currency: { type: string, const: SLE }
+            providerReference: { type: [string, "null"] }
+            failureCode: { type: [string, "null"] }
+    ProvidersResponse:
+      type: object
+      description: Provider roles and their verification state.
+      additionalProperties: true
+    ErrorEnvelope:
+      type: object
+      required: [error]
+      properties:
+        error:
+          type: object
+          required: [code, message]
+          properties:
+            code:
+              type: string
+              description: Stable machine-readable code, for example `TRANSFER_NOT_FOUND`.
+            message:
+              type: string
+              description: Human-readable explanation. Never contains request content or credentials.
+  responses:
+    Error:
+      description: Safe error response
+      headers:
+        x-request-id: { $ref: "#/components/headers/RequestId" }
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorEnvelope" }
+          examples:
+            notFound:
+              value:
+                error:
+                  code: TRANSFER_NOT_FOUND
+                  message: The transfer does not exist for this partner.
